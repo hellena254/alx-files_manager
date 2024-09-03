@@ -1,5 +1,9 @@
-import express from 'express';
-import AppController from '../controllers/AppController';
+const express = require('express');
+const AppController = require('../controllers/AppController');
+const UsersController = require('../controllers/UsersController');  // Import UsersController
+const AuthController = require('../controllers/AuthController');    // Import AuthController
+const UserController = require('../controllers/UserController');    // Import UserController
+const FilesController = require('../controllers/FilesController');  // Import FilesController
 
 const router = express.Router();
 
@@ -11,5 +15,7 @@ router.get('/connect', AuthController.getConnect);
 router.get('/disconnect', AuthController.getDisconnect);
 router.get('/users/me', UserController.getMe);
 router.post('/files', FilesController.postUpload);
+router.get('/files/:id', FilesController.getShow);
+router.get('/files', FilesController.getIndex);
 
 export default router;

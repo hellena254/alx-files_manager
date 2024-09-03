@@ -17,6 +17,7 @@ async function getUserFromToken(token) {
 }
 
 class FilesController {
+  // Endpoint to upload a file
   static async postUpload(req, res) {
     const token = req.header('X-Token');
     if (!token) {
@@ -104,6 +105,55 @@ class FilesController {
       return res.status(500).json({ error: 'Unable to save the file' });
     }
   }
+
+  // Endpoint to get file by ID
+  static async getShow(req, res) {
+    const token = req.header('X-Token');
+    if (!token) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const user = await getUserFromToken(token);
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { id } = req.params;
+    const file = await dbClient.files.findOne({ _id: dbClient.getObjectId(id), userId: user._id });
+    if (!file) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+
+    return res.json(file);
+  }
+
+  // Endpoint to get all files for a user
+  static async getIndex(req, res) {
+    const token = req.header('X-Token');
+    if (!token) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const user = await getUserFromToken(token);
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { parentId = '0', page = 0 } = req.query;
+    const limit = 20;
+    const skip = parseInt(page, 10) * limit;
+
+    const files = await dbClient.files
+      .aggregate([
+        { $match: { parentId, userId: user._id } },
+        { $skip: skip },
+        { $limit: limit },
+      ])
+      .toArray();
+
+    return res.json(files);
+  }
 }
 
 module.exports = FilesController;
+
