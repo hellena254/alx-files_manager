@@ -1,9 +1,9 @@
 const { v4: uuidv4 } = require('uuid');
 const fs = require('fs');
 const path = require('path');
+const mime = require('mime-types');
 const dbClient = require('../utils/db');
 const redisClient = require('../utils/redis');
-const mime = require('mime-types');
 
 // Helper function to check if the user is authenticated
 async function getUserFromToken(token) {
@@ -36,14 +36,13 @@ class FilesController {
     }
 
     if (!['folder', 'file', 'image'].includes(type)) {
-      return res.status(400).json({ error: 'Missing type' });
+      return res.status(400).json({ error: 'Invalid type' });
     }
 
     if ((type === 'file' || type === 'image') && !data) {
       return res.status(400).json({ error: 'Missing data' });
     }
 
-    // Check for parentId if provided
     let parentFile;
     if (parentId !== '0') {
       parentFile = await dbClient.files.findOne({ _id: dbClient.getObjectId(parentId) });
@@ -63,7 +62,6 @@ class FilesController {
       parentId,
     };
 
-    // Handling folder creation
     if (type === 'folder') {
       const result = await dbClient.files.insertOne(fileDocument);
       return res.status(201).json({
@@ -76,7 +74,6 @@ class FilesController {
       });
     }
 
-    // Handling file/image creation
     const folderPath = process.env.FOLDER_PATH || '/tmp/files_manager';
     const localPath = path.join(folderPath, uuidv4());
 
@@ -153,7 +150,101 @@ class FilesController {
 
     return res.json(files);
   }
+
+  // Endpoint to publish a file
+  static async putPublish(req, res) {
+    const token = req.header('X-Token');
+    if (!token) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const user = await getUserFromToken(token);
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { id } = req.params;
+    const file = await dbClient.files.findOne({ _id: dbClient.getObjectId(id), userId: user._id });
+    if (!file) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+
+    const result = await dbClient.files.updateOne(
+      { _id: dbClient.getObjectId(id), userId: user._id },
+      { $set: { isPublic: true } }
+    );
+
+    if (result.modifiedCount === 0) {
+      return res.status(500).json({ error: 'Unable to update the file' });
+    }
+
+    const updatedFile = await dbClient.files.findOne({ _id: dbClient.getObjectId(id) });
+    return res.status(200).json(updatedFile);
+  }
+
+  // Endpoint to unpublish a file
+  static async putUnpublish(req, res) {
+    const token = req.header('X-Token');
+    if (!token) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const user = await getUserFromToken(token);
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { id } = req.params;
+    const file = await dbClient.files.findOne({ _id: dbClient.getObjectId(id), userId: user._id });
+    if (!file) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+
+    const result = await dbClient.files.updateOne(
+      { _id: dbClient.getObjectId(id), userId: user._id },
+      { $set: { isPublic: false } }
+    );
+
+    if (result.modifiedCount === 0) {
+      return res.status(500).json({ error: 'Unable to update the file' });
+    }
+
+    const updatedFile = await dbClient.files.findOne({ _id: dbClient.getObjectId(id) });
+    return res.status(200).json(updatedFile);
+  }
+
+  // Endpoint to get file content
+  static async getFile(req, res) {
+    const token = req.header('X-Token');
+    const { id } = req.params;
+    const file = await dbClient.files.findOne({ _id: dbClient.getObjectId(id) });
+
+    if (!file) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+
+    if (file.type === 'folder') {
+      return res.status(400).json({ error: "A folder doesn't have content" });
+    }
+
+    if (!file.isPublic) {
+      const user = await getUserFromToken(token);
+      if (!user || file.userId.toString() !== user._id.toString()) {
+        return res.status(404).json({ error: 'Not found' });
+      }
+    }
+
+    if (!fs.existsSync(file.localPath)) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+
+    const mimeType = mime.lookup(file.name) || 'application/octet-stream';
+
+    res.setHeader('Content-Type', mimeType);
+    const fileStream = fs.createReadStream(file.localPath);
+
+    fileStream.pipe(res);
+  }
 }
 
 module.exports = FilesController;
-
