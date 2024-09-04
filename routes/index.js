@@ -1,3 +1,5 @@
+#!/usr/bin/node
+
 const express = require('express');
 const AppController = require('../controllers/AppController');
 const UsersController = require('../controllers/UsersController');  // Import UsersController
@@ -21,4 +23,4 @@ router.put('/files/:id/publish', FilesController.putPublish);
 router.put('/files/:id/publish', FilesController.putUnpublish);
 router.get('/files/:id/data', FilesController.getFile);
 
-export default router;
+module.exports = router;
