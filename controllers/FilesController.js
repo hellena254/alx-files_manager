@@ -1,5 +1,3 @@
-#!/usr/bin/node
-
 import { tmpdir } from 'os';
 import { promisify } from 'util';
 import Queue from 'bull/lib/queue';
