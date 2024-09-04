@@ -1,49 +1,92 @@
-import { v4 as uuidv4 } from 'uuid';
-import redisClient from '../utils/redis';
-import dbClient from '../utils/db';
-import sha1 from 'sha1';
+#!/usr/bin/node
+
+const { v4 } = require('uuid');
+const dbClient = require('../utils/db');
+const redisClient = require('../utils/redis');
+const { getAuthzHeader, getToken, pwdHashed } = require('../utils/utils');
+const { decodeToken, getCredentials } = require('../utils/utils');
 
 class AuthController {
+  /**
+   * Handles user login and token issuance.
+   * @param {object} req - The request object.
+   * @param {object} res - The response object.
+   */
   static async getConnect(req, res) {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Basic ')) {
-      return res.status(401).json({ error: 'Unauthorized' });
+    const authzHeader = getAuthzHeader(req);
+    if (!authzHeader) {
+      return res.status(401).json({ error: 'Unauthorized' }).end();
     }
 
-    const base64Credentials = authHeader.split(' ')[1];
-    const credentials = Buffer.from(base64Credentials, 'base64').toString('ascii');
-    const [email, password] = credentials.split(':');
-
-    if (!email || !password) {
-      return res.status(401).json({ error: 'Unauthorized' });
+    const token = getToken(authzHeader);
+    if (!token) {
+      return res.status(401).json({ error: 'Unauthorized' }).end();
     }
 
-    const user = await dbClient.client.collection('users').findOne({ email });
-    if (!user || user.password !== sha1(password)) {
-      return res.status(401).json({ error: 'Unauthorized' });
+    const decodedToken = decodeToken(token);
+    if (!decodedToken) {
+      return res.status(401).json({ error: 'Unauthorized' }).end();
     }
 
-    const token = uuidv4();
-    const key = `auth_${token}`;
-    await redisClient.set(key, user._id.toString(), 86400);
+    const { email, password } = getCredentials(decodedToken);
+    const user = await dbClient.getUser(email);
+    if (!user || user.password !== pwdHashed(password)) {
+      return res.status(401).json({ error: 'Unauthorized' }).end();
+    }
 
-    return res.status(200).json({ token });
+    const accessToken = v4();
+    await redisClient.set(`auth_${accessToken}`, user._id.toString('utf8'), 60 * 60 * 24);
+    return res.json({ token: accessToken }).end();
   }
 
+  /**
+   * Handles user logout and token invalidation.
+   * @param {object} req - The request object.
+   * @param {object} res - The response object.
+   */
   static async getDisconnect(req, res) {
     const token = req.headers['x-token'];
     if (!token) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      return res.status(401).json({ error: 'Unauthorized' }).end();
     }
 
-    const userId = await redisClient.get(`auth_${token}`);
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
+    const id = await redisClient.get(`auth_${token}`);
+    if (!id) {
+      return res.status(401).json({ error: 'Unauthorized' }).end();
+    }
+
+    const user = await dbClient.getUserById(id);
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' }).end();
     }
 
     await redisClient.del(`auth_${token}`);
-    return res.status(204).send();
+    return res.status(204).end();
+  }
+
+  /**
+   * Handles retrieving the current user's information.
+   * @param {object} req - The request object.
+   * @param {object} res - The response object.
+   */
+  static async getMe(req, res) {
+    const token = req.headers['x-token'];
+    if (!token) {
+      return res.status(401).json({ error: 'Unauthorized' }).end();
+    }
+
+    const id = await redisClient.get(`auth_${token}`);
+    if (!id) {
+      return res.status(401).json({ error: 'Unauthorized' }).end();
+    }
+
+    const user = await dbClient.getUserById(id);
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' }).end();
+    }
+
+    return res.json({ id: user._id, email: user.email }).end();
   }
 }
 
-export default AuthController;
+module.exports = AuthController;
